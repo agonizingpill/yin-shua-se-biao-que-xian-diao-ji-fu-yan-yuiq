@@ -1,0 +1,5 @@
+import {api} from './api.js';
+export const store={user:null,jobs:[],proofs:[],adjustments:[],plates:[],samples:[],holds:[],paperLots:[],paperIssues:[],machines:[],inspections:[],packs:[],shipments:[],proofId:null,adjustmentId:null};
+export async function refresh(){[store.jobs,store.proofs,store.adjustments,store.plates,store.samples,store.holds,store.paperLots,store.paperIssues,store.machines,store.inspections,store.packs,store.shipments]=await Promise.all([api('/jobs'),api('/proofs'),api('/adjustments'),api('/plates'),api('/press-samples'),api('/press-holds'),api('/paper-lots'),api('/paper-issues'),api('/press-machines'),api('/press-inspections'),api('/print-packs'),api('/print-shipments')]);if(!store.proofId&&store.proofs.length)store.proofId=store.proofs[0].id;if(!store.adjustmentId&&store.adjustments.length)store.adjustmentId=store.adjustments.at(-1).id;return store}
+export const proof=s=>s.proofs.find(x=>x.id===Number(s.proofId));
+export const adjustment=s=>s.adjustments.find(x=>x.id===Number(s.adjustmentId));
