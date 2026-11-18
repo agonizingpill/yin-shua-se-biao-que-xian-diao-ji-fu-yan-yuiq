@@ -97,3 +97,24 @@ PrintPack箱码唯一，open可取消；production且无活动Hold/待判读样�
 按父工单锁串行化领退纸、累计印量、封箱和装运；锁读populate_existing刷新身份缓存。MySQL使用READ COMMITTED，取得工单锁后的聚合读取已提交净领纸/封箱量，避免等待前快照导致超额。种子仅缺失时添加157g/128g批次和PRESS-04，保留人工库存、历史signed与发货快照。
 
 本演示按张数追溯，不接真实WMS/物流，也不估算裁切、调机废纸；生产累计读数和现场可退余纸由机长录入，系统约束上限及一次退回。原240次/分钟限流仍生效。真实v3证据保存在test-artifacts/gb-1030/v3/。
+
+
+## V4 客诉退回复测与同批箱追溯
+
+保留原九页并新增“客诉退回复测”页，共十业务页面。客户退回的成品箱从原箱建立Complaint，登记新ProofSheet复测色标并交Redis/Python worker判读；仍用ReferenceSheet的StandardScaler+RBF SVM训练判别，客诉样张不进入参考训练，判读证据与通用色标一致（概率、30张留出混淆矩阵）。
+
+**不以可疑成品自身解禁**：客诉只信原箱 `PrintPack.sample_snapshot` 里封箱时的合格量产抽检（PressSample须仍为passed且ProofSheet已判合格）。受理时按该合格抽检依据追溯同工单全部已封/已发箱：退回箱置returned、未发同批箱置quarantined、已发同批箱登记ComplaintRecall待召回并保持原shipped状态，`PrintShipment.snapshot` 不改写。不同合格抽检封出的后续箱不属于该批。ComplaintBox与ComplaintRecall分别按（客诉,箱）和（客诉,发货单）唯一，受理/判读/重试重复执行不会重复建箱或重复召回。
+
+**受理即冻结放行**：Complaint受理后 `accepted`/`defect` 均为冻结态，封箱、建发货单、装运统一经 `release_guard` 校验客诉冻结批次及待核实拦截；工单封箱额度把隔离/退回/处置箱计入已分配张数，避免隔离释放额度。量产停复机只改PrintJob/PressHold，不解除箱隔离；主管复机后同批箱仍冻结，须走客诉解除或逐箱处置。
+
+**结案规则**：复测判合格→主管 `release` 解除冻结，同批未发箱恢复sealed、待召回置cancelled，退回箱保留returned；复测判缺陷（乳化/偏色）→须逐箱 `dispose`（报废/返修/退回供应商），已发箱先完成召回再处置，全部处置且无待召回后主管 `close` 结案。判读中不能解除或结案；重复解除/结案幂等返回。
+
+**并发不漏箱**：受理、追溯、处置均先锁PrintJob再锁Complaint/PrintPack，与封箱装运同一父工单锁串行。客诉与封箱/装运并发时，装运复核箱单成员批次，已冻结批次的草稿箱单也拒绝装运；追溯按当前已封/已发集合重扫，新封箱不落在旧快照外。
+
+**旧箱依据缺失拦截**：原箱或同批箱封箱快照缺失、快照指向的抽检不存在/非合格、已发箱缺ShipmentPack时，不静默漏箱：登记JobVerification待核实并拦住该开机单的封箱/建发货单/装运，须主管选用同工单仍合格的量产抽检并附依据 `resolve`，缺失箱一并纳入受影响范围，之后才继续客诉受理与处置。
+
+**页面与接口**：新增客诉页可登记复测新色标、重试判读、受理、主管解除/结案、逐箱处置、召回完成与旧箱核实；装箱页显示客诉隔离/退回箱与待核实提示。主要API：`GET/POST /complaints`、`GET /complaints/{id}`、`POST /complaints/{id}/retest|accept|release|close`、`POST /complaints/{id}/boxes/{box}/dispose`、`POST /complaints/{id}/recalls/{recall}/complete`、`GET /job-verifications`、`POST /job-verifications/{id}/resolve`。机长可登记/受理/重试/逐箱处置/召回完成，主管专属解除、结案、旧箱核实，viewer只读。
+
+**worker 与证据**：判读结果先独立提交，客诉追溯在第二个事务中执行，追溯异常不回滚已持久化的判读；`/artifacts/proof-<id>.json` 仍保存证据。旧判读/签印不改写，客诉只新增记录。Seed不伪造客诉或召回。新4表自动补建，无旧表列变更；重复seed保留人工客诉与处置进度。
+
+范围：仍按张数追溯、不接真实WMS/物流/客户系统；召回与逐箱处置由人工登记，不直接控制实物；隔离箱仍保留原封箱与装运快照供追溯。固定模拟参考的高留出准确率不代表真实生产准确率。

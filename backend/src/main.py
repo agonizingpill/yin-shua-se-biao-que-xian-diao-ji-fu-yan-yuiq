@@ -13,6 +13,7 @@ from .services import get,pack,audit,editable_proof,issue,change_instruction,sig
 from .middlewares import RequestTrace,BurstGuard
 from .production_routes import router as production
 from .dispatch_routes import router as dispatches
+from .complaint_routes import router as complaints
 from .plate_service import require_ready
 from .paper_service import locked
 from .constants import ROLES,DEFECTS,JOB_STATES,ADJUSTMENT_STATES
@@ -28,8 +29,8 @@ async def lifespan(app):
     yield
 app=FastAPI(title='铅叶 · 色标缺陷与调机复验',lifespan=lifespan);app.add_middleware(RequestTrace);app.add_middleware(BurstGuard)
 @app.exception_handler(IntegrityError)
-async def conflict(req,exc):return JSONResponse({'detail':'工单、色标编号或首张调机指令重复，请核对'},409)
-app.include_router(production);app.include_router(dispatches)
+async def conflict(req,exc):return JSONResponse({'detail':'工单、色标、客诉、箱码或首张调机指令重复，请核对'},409)
+app.include_router(production);app.include_router(dispatches);app.include_router(complaints)
 @app.get('/health')
 def health(s=Depends(db_session)):s.execute(select(1));r.ping();return {'status':'ok'}
 @app.post('/auth/login')
@@ -69,7 +70,10 @@ def edit_proof(pid:int,p:ProofInput,s=Depends(db_session),u=Depends(writers)):
     x.defect=None;x.pass_flag=False;x.evidence=None;x.classification_state='unmeasured';x.classified_at=None;audit(s,u,'修订色标 '+x.code);s.commit();return pack(x)
 @app.post('/proofs/{pid}/classify')
 def classify(pid:int,s=Depends(db_session),u=Depends(writers)):
-    x=get(s,ProofSheet,pid);editable_proof(s,x);x.classification_state='classifying';x.defect=None;x.pass_flag=False;x.evidence=None;x.classified_at=None;audit(s,u,'色标判读入队 '+x.code);s.commit()
+    from .complaint_models import Complaint
+    x=get(s,ProofSheet,pid)
+    if s.scalar(select(Complaint.id).where(Complaint.proof_id==pid)):raise HTTPException(409,'客诉复测色标请在客诉页重试判读')
+    editable_proof(s,x);x.classification_state='classifying';x.defect=None;x.pass_flag=False;x.evidence=None;x.classified_at=None;audit(s,u,'色标判读入队 '+x.code);s.commit()
     try:r.rpush('press-classify',pid)
     except Exception:x.classification_state='failed';s.commit();raise HTTPException(503,'判读队列暂不可用，请重试')
     return pack(x)

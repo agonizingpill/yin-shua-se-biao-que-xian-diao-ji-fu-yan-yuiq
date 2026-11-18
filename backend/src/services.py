@@ -11,11 +11,15 @@ def get(s,cls,id):
 def pack(v):return {c.name:getattr(v,c.name)for c in v.__table__.columns}
 def audit(s,u,action):s.add(Audit(actor=u.email,action=action,stamp=now()))
 def editable_proof(s,p):
+    from .complaint_models import Complaint
+    if s.scalar(select(Complaint.id).where(Complaint.proof_id==p.id)):raise HTTPException(409,'客诉复测色标由客诉流程管理，不能在校正/通用判读中改写')
     if p.classification_state=='classifying':raise HTTPException(409,'判读进行中，色标暂不可修改')
     if get(s,PrintJob,p.job_id).status in ['production','hold']:raise HTTPException(409,'已签印量产工单，色标已冻结')
     if s.scalar(select(Adjustment.id).where(or_(Adjustment.proof_id==p.id,Adjustment.reproof_id==p.id))):raise HTTPException(409,'已关联调机或签印，源色标冻结')
 def issue(s,proof_id):
+    from .complaint_models import Complaint
     p=get(s,ProofSheet,proof_id);job=get(s,PrintJob,p.job_id)
+    if s.scalar(select(Complaint.id).where(Complaint.proof_id==p.id)):raise HTTPException(409,'客诉复测色标按客诉流程处置，不能生成常规调机指令')
     if job.status in ['production','hold']:raise HTTPException(409,'量产或停机工单须使用抽检/停机复验流程')
     if p.classification_state!='classified' or p.defect not in ('乳化','偏色'):raise HTTPException(409,'仅已判读的不合格色标可生成调机指令')
     if s.scalar(select(Adjustment.id).where(Adjustment.job_id==job.id,Adjustment.status!='signed')):raise HTTPException(409,'本工单已有未闭合调机，请先完成复验')

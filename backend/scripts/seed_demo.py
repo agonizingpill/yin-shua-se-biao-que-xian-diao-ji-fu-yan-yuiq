@@ -5,6 +5,7 @@ from src.models import User,PrintJob,ProofSheet,Adjustment,ReferenceSheet
 from src.auth import hash_password
 from src.production_models import PlateSet,PressSample,PressHold
 from src.dispatch_models import PaperLot,PressMachine
+from src.complaint_models import Complaint,ComplaintBox,ComplaintRecall,JobVerification
 
 def seed():
     Base.metadata.create_all(engine)
